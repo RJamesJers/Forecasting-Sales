@@ -1,0 +1,139 @@
+---
+title: "Forecasting project"
+author: "Rob James"
+date: "7 March 2019"
+output: html_document
+---
+
+
+``` {r setup, include=FALSE}
+library(fpp2)
+```
+
+# Data Exploration
+Firstly the data is imported , converted to a data frame and then explored:
+``` {r}
+vdata <- read.csv("dataset.csv")
+df <- data.frame(vdata)
+head(df,n = 5)
+```
+
+First difficulties are seen with the Date format as it has arrived as a factor and only with month and year. R struggles with this so I added a placeholder 1 as the beginning of the month and then converted the variable to a date format.
+
+```{r}
+df$yearmonth <- paste0('01-',df$yearmonth)
+df$yearmonth <- as.Date(df$yearmonth,format="%d-%b-%y")
+```
+
+As we are dealing with Time series data, a Time series object is created:
+
+```{r}
+timeseries <- ts(df[,c(3)], start = c(2014, 1), frequency = 12)
+```
+
+Then we create a quick chart to view the overall trend so far
+
+```{r}
+autoplot(timeseries,ylab = "Invoice Amt",xlab = "Date")
+```
+
+The first year's figures are significantly different from the rest of the figures; this could be as a result of the business starting up and thus should not be considered normal operating figures.
+This would likely hamper the predictive power later on, so the figures are dropped. 
+
+Also the chart has a bunch of NA figures at the end which will be annoying to deal with later on so these are dropped for the time being.
+
+Another chart is created to view the difference
+
+```{r}
+df2 <- subset(df,subset = df$yearmonth>"2014-12-01")
+df2 <- subset(df2,subset = df2$InvoiceAmt!="NA")
+
+timeseries2 <- ts(df2[,c(3)], start = c(2015, 1), frequency = 12)
+
+autoplot(timeseries2,ylab = "Invoice Amt",xlab = "Date")
+```
+
+Now we check to see if there is a seasonal pattern:
+
+```{r}
+ggseasonplot(timeseries2,ylab = "Invoice Amt")
+```
+
+At this point we can see that there appears to be a peak in sales during the summer in June/ July.
+
+We can perform a Ljung-Box test to see if the data is random. (A p-value of greater than 0.05 suggests that the residuals are not significantly different to white noise)
+
+```{r}
+Box.test(diff(timeseries2), lag = 10, type = "Ljung")
+```
+
+As the p-value is 0.0118 (and thus < 0.05) the changes in the InvoiceAMT are not random, which is good for our forecasting. 
+
+# Forecasting
+At this point we can begin predicting using seasonal Naive forecasting
+
+The tables show us a rough estimate with the Point Forecast and both the 80% and 95% confidence intervals.
+The charts give a nice visual display of this information.
+
+### 12 Month Naive Forecast
+```{r}
+fcnaiveforward12 <- snaive(timeseries2,h=12)
+autoplot(fcnaiveforward12,ylab = "Invoice Amt", xlab = "Date",title = "12 month Prediction")
+summary(fcnaiveforward12)
+
+```
+
+### 36 Month Naive Forecast
+```{r}
+fcnaiveforward36 <- snaive(timeseries2,h=36)
+autoplot(fcnaiveforward36,ylab = "Invoice Amt", xlab = "Date",title = "36 month Prediction")
+summary(fcnaiveforward36)
+```
+
+The Naive forecasting gives us a rough idea of where the future figures may lie.
+
+We then check to see if the residuals are random; I.E. our forecasting has captured all the available information in the data.
+
+```{r}
+timeseries2 %>% snaive() %>% checkresiduals()
+```
+
+As the residuals have a p-value of > 0.05, they resemble white noise and we can be happy that the residuals are independent.
+
+### Forecast on training set
+In order to work out if the Naive forecasting is at all accurate, we can create a forecast of the last years figures and compare it to the actual recorded figures.
+
+```{r}
+test <- tail(timeseries2,n = 12)
+
+endo <- tail(df2$yearmonth,n = 12)
+headendo <- head(endo,n = 1)
+endyear <- as.numeric(substring(headendo,first = 0,last = 4))
+train <- window(timeseries2,end = endyear)
+
+fcnaivetrain <- snaive(train,h=12)
+
+accuracy(fcnaivetrain, timeseries2)
+
+```
+
+As we can see the training set has a low RMSE score and a low MAPE score, both of which are good!
+
+ 
+### Other Issues / Thoughts
+
+It would probably be worth diving deeper into the data set to understand how the invoice figures are being created. For example, it would be good to understand which how individual customers are paying - some customers may be paying regularly, whereas some may be paying seasonably. Understanding this information would greatly enhance the predictive model.
+
+Other models could be considered for forecasting such as: 
+
+--- Exponential smoothing 
+
+--- ARIMA Models
+
+--- Time-Series Cross Validation
+
+In order to make sure that the model is automatable in the future I made sure to write the following code segments:
+
+--- All the subsetting of the data is from 2015-> onwards with no bound allowing new data to be entered into the model easily. 
+
+--- In "Forecasting on Training data", it was made sure that the last year of the data set is dropped. The code automatically selects the last year of the dataset, (instead of being manually selected) so going forward it will not need updating.
